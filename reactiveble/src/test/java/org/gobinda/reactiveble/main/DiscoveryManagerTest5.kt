@@ -5,8 +5,10 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.content.Context
+import android.content.IntentFilter
 import io.mockk.*
 import kotlinx.coroutines.*
+import org.gobinda.reactiveble.common.IntentFilterFactory
 import org.gobinda.reactiveble.common.PermissionManager
 import org.gobinda.reactiveble.discovery.DiscoveredDevice
 import org.gobinda.reactiveble.discovery.DiscoveryManager
@@ -33,6 +35,8 @@ class DiscoveryManagerTest5 {
     private lateinit var mBluetoothAdapter: BluetoothAdapter
     private lateinit var mBluetoothLeScanner: BluetoothLeScanner
     private lateinit var mScanCallback: CapturingSlot<ScanCallback>
+    private lateinit var mIntentFilterFactory: IntentFilterFactory
+    private lateinit var mIntentFilter: IntentFilter
 
     @Before
     fun setup() {
@@ -44,12 +48,15 @@ class DiscoveryManagerTest5 {
         mBluetoothAdapter = mockk()
         mBluetoothLeScanner = mockk()
         mScanCallback = slot()
+        mIntentFilterFactory = mockk()
+        mIntentFilter = mockk()
 
         startKoin {
             modules(
                 module {
                     single { mContext }
                     single { mPermissionManager }
+                    single { mIntentFilterFactory }
                     single<DiscoveryManager> { DiscoveryManagerImpl(androidContext()) }
                     single<BluetoothSdk> { BluetoothSdkImpl() }
                 }
@@ -57,8 +64,13 @@ class DiscoveryManagerTest5 {
         }
     }
 
+    /**
+     * scan gets failed before discovering any device,
+     * - all the permissions are okay,
+     * - bluetooth adapter is enabled
+     */
     @Test
-    fun testExceptionOccursWhileDiscovering(): Unit = runBlocking {
+    fun testNow(): Unit = runBlocking {
 
         every { mPermissionManager.missingBluetoothStartScanPermission() } returns false
         every { mContext.getSystemService(Context.BLUETOOTH_SERVICE) } returns mBluetoothManager
@@ -72,6 +84,10 @@ class DiscoveryManagerTest5 {
             }
         }
         every { mBluetoothLeScanner.stopScan(capture(mScanCallback)) } returns Unit
+        every { mIntentFilterFactory.getNewIntentFilter(any()) } returns mIntentFilter
+        every { mIntentFilter.addAction(any()) } returns Unit
+        every { mContext.registerReceiver(any(), any()) } returns mockk()
+        every { mContext.unregisterReceiver(any()) } returns Unit
 
         var globalExceptionFound = false
         var scanFailedExceptionFound = false
@@ -96,6 +112,8 @@ class DiscoveryManagerTest5 {
         assert(discoveredList.isEmpty())
         verify { mBluetoothLeScanner.startScan(capture(mScanCallback)) }
         verify { mBluetoothLeScanner.stopScan(capture(mScanCallback)) }
+        verify { mContext.registerReceiver(any(), any()) }
+        verify { mContext.unregisterReceiver(any()) }
     }
 
     @After

@@ -14,6 +14,7 @@ import org.gobinda.reactiveble.common.PermissionManager
 import org.gobinda.reactiveble.discovery.DiscoveredDevice
 import org.gobinda.reactiveble.discovery.DiscoveryManager
 import org.gobinda.reactiveble.discovery.DiscoveryManagerImpl
+import org.gobinda.reactiveble.errors.ScanFailedException
 import org.gobinda.reactiveble.log.TimberTestTree
 import org.junit.After
 import org.junit.Before
@@ -25,7 +26,7 @@ import org.koin.dsl.module
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 
-class DiscoveryManagerTest4 {
+class DiscoveryManagerTest6 {
 
     private val bluetoothSdk: BluetoothSdk by inject(BluetoothSdk::class.java)
 
@@ -65,23 +66,20 @@ class DiscoveryManagerTest4 {
     }
 
     /**
-     * successfully discovered 2 devices,
-     * - all the permissions are okay
-     * - bluetooth adapter was enabled
+     * scan gets failed after discovering 1 device,
+     * - all the permissions are okay,
+     * - bluetooth adapter is enabled
      */
     @Test
     fun testNow(): Unit = runBlocking {
 
-        val deviceNameList = listOf("ble device 1", "ble device 2")
-        val deviceAddressList = listOf("11:22:33:44:55:66", "99:88:77:66:55:44")
+        val discoveredDeviceName = "ble device 1"
+        val discoveredDeviceAddress = "11:22:33:44:55:66"
+        val scanFailedExceptionCode = 1200
 
-        val scanResult1 = mockk<ScanResult> {
-            every { device.name } returns deviceNameList[0]
-            every { device.address } returns deviceAddressList[0]
-        }
-        val scanResult2 = mockk<ScanResult> {
-            every { device.name } returns deviceNameList[1]
-            every { device.address } returns deviceAddressList[1]
+        val scanResult = mockk<ScanResult> {
+            every { device.name } returns discoveredDeviceName
+            every { device.address } returns discoveredDeviceAddress
         }
 
         every { mPermissionManager.missingBluetoothStartScanPermission() } returns false
@@ -91,10 +89,10 @@ class DiscoveryManagerTest4 {
         every { mBluetoothAdapter.bluetoothLeScanner } returns mBluetoothLeScanner
         every { mBluetoothLeScanner.startScan(capture(mScanCallback)) } answers {
             launch {
-                delay(100)
-                mScanCallback.captured.onScanResult(1, scanResult1)
-                delay(50)
-                mScanCallback.captured.onScanResult(2, scanResult2)
+                delay(10)
+                mScanCallback.captured.onScanResult(1, scanResult)
+                delay(10)
+                mScanCallback.captured.onScanFailed(scanFailedExceptionCode)
             }
         }
         every { mBluetoothLeScanner.stopScan(capture(mScanCallback)) } returns Unit
@@ -104,29 +102,28 @@ class DiscoveryManagerTest4 {
         every { mContext.unregisterReceiver(any()) } returns Unit
 
         var globalExceptionFound = false
-        var jobCancellationExceptionFound = false
+        var scanFailedExceptionFound = false
         val discoveredList = mutableListOf<DiscoveredDevice>()
 
         val mJob = launch {
             try {
                 bluetoothSdk.discoveryManager.startScan().collect {
-                    assert(deviceNameList.contains(it.name))
-                    assert(deviceAddressList.contains(it.address))
+                    assert(it.name == discoveredDeviceName)
+                    assert(it.address == discoveredDeviceAddress)
                     discoveredList.add(it)
                 }
-            } catch (e: CancellationException) {
-                jobCancellationExceptionFound = true
+            } catch (e: ScanFailedException) {
+                assert(e.errorCode == scanFailedExceptionCode)
+                scanFailedExceptionFound = true
             } catch (e: Exception) {
                 globalExceptionFound = true
             }
         }
+        mJob.join()
 
-        delay(200)
-        mJob.cancelAndJoin()
-
-        assert(jobCancellationExceptionFound)
+        assert(scanFailedExceptionFound)
         assert(globalExceptionFound.not())
-        assert(discoveredList.size == 2)
+        assert(discoveredList.size == 1)
         verify { mBluetoothLeScanner.startScan(capture(mScanCallback)) }
         verify { mBluetoothLeScanner.stopScan(capture(mScanCallback)) }
         verify { mContext.registerReceiver(any(), any()) }

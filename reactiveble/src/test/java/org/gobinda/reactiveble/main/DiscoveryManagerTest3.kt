@@ -53,8 +53,12 @@ class DiscoveryManagerTest3 {
         }
     }
 
+    /**
+     * All the permissions are okay, device also supports bluetooth, but
+     * bluetooth adapter is not enabled (that's the exception here)
+     */
     @Test
-    fun testNullBluetoothAdapterException(): Unit = runBlocking {
+    fun testNow(): Unit = runBlocking {
 
         every { mPermissionManager.missingBluetoothStartScanPermission() } returns false
         every { mContext.getSystemService(Context.BLUETOOTH_SERVICE) } returns mBluetoothManager

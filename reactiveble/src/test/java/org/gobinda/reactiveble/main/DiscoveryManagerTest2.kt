@@ -47,8 +47,12 @@ class DiscoveryManagerTest2 {
         }
     }
 
+    /**
+     * Device doesn't support bluetooth,
+     * then NullBluetoothAdapterException will be thrown
+     */
     @Test
-    fun testNullBluetoothAdapterException(): Unit = runBlocking {
+    fun testNow(): Unit = runBlocking {
 
         every { mPermissionManager.missingBluetoothStartScanPermission() } returns false
         every { mContext.getSystemService(Context.BLUETOOTH_SERVICE) } returns null

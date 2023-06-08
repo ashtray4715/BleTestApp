@@ -48,11 +48,10 @@ class DiscoveryManagerTest1 {
     }
 
     /**
-     * Here we will test when there is missing permission
-     * Since permission is missing, so we won't be able to startScan()
+     * Permission is missing
      */
     @Test
-    fun testPermissionError(): Unit = runBlocking {
+    fun testNow(): Unit = runBlocking {
 
         every { mPermissionManager.missingBluetoothStartScanPermission() } returns true
 

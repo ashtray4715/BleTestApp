@@ -5,7 +5,9 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import io.mockk.*
 import kotlinx.coroutines.*
@@ -14,6 +16,7 @@ import org.gobinda.reactiveble.common.PermissionManager
 import org.gobinda.reactiveble.discovery.DiscoveredDevice
 import org.gobinda.reactiveble.discovery.DiscoveryManager
 import org.gobinda.reactiveble.discovery.DiscoveryManagerImpl
+import org.gobinda.reactiveble.errors.DisabledBluetoothAdapterException
 import org.gobinda.reactiveble.log.TimberTestTree
 import org.junit.After
 import org.junit.Before
@@ -25,7 +28,7 @@ import org.koin.dsl.module
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 
-class DiscoveryManagerTest4 {
+class DiscoveryManagerTest7 {
 
     private val bluetoothSdk: BluetoothSdk by inject(BluetoothSdk::class.java)
 
@@ -37,6 +40,7 @@ class DiscoveryManagerTest4 {
     private lateinit var mScanCallback: CapturingSlot<ScanCallback>
     private lateinit var mIntentFilterFactory: IntentFilterFactory
     private lateinit var mIntentFilter: IntentFilter
+    private lateinit var mBroadcastReceiver: CapturingSlot<BroadcastReceiver>
 
     @Before
     fun setup() {
@@ -50,6 +54,7 @@ class DiscoveryManagerTest4 {
         mScanCallback = slot()
         mIntentFilterFactory = mockk()
         mIntentFilter = mockk()
+        mBroadcastReceiver = slot()
 
         startKoin {
             modules(
@@ -65,9 +70,10 @@ class DiscoveryManagerTest4 {
     }
 
     /**
-     * successfully discovered 2 devices,
+     * Bluetooth gets disabled after discovering 2 device,
+     * Flow will be closed and DisabledBluetoothAdapterException will be thrown
      * - all the permissions are okay
-     * - bluetooth adapter was enabled
+     * - bluetooth adapter was enabled initially
      */
     @Test
     fun testNow(): Unit = runBlocking {
@@ -93,18 +99,28 @@ class DiscoveryManagerTest4 {
             launch {
                 delay(100)
                 mScanCallback.captured.onScanResult(1, scanResult1)
-                delay(50)
-                mScanCallback.captured.onScanResult(2, scanResult2)
+                delay(100)
+                mScanCallback.captured.onScanResult(1, scanResult2)
             }
         }
         every { mBluetoothLeScanner.stopScan(capture(mScanCallback)) } returns Unit
         every { mIntentFilterFactory.getNewIntentFilter(any()) } returns mIntentFilter
         every { mIntentFilter.addAction(any()) } returns Unit
-        every { mContext.registerReceiver(any(), any()) } returns mockk()
+        every { mContext.registerReceiver(capture(mBroadcastReceiver), any()) } answers {
+            val mCurrentIntent = mockk<Intent> {
+                every { action } returns BluetoothAdapter.ACTION_STATE_CHANGED
+                every { getIntExtra(any(), any()) } returns BluetoothAdapter.STATE_OFF
+            }
+            launch {
+                delay(300)
+                mBroadcastReceiver.captured.onReceive(mContext, mCurrentIntent)
+            }
+            mCurrentIntent
+        }
         every { mContext.unregisterReceiver(any()) } returns Unit
 
         var globalExceptionFound = false
-        var jobCancellationExceptionFound = false
+        var disabledBluetoothAdapterException = false
         val discoveredList = mutableListOf<DiscoveredDevice>()
 
         val mJob = launch {
@@ -114,17 +130,15 @@ class DiscoveryManagerTest4 {
                     assert(deviceAddressList.contains(it.address))
                     discoveredList.add(it)
                 }
-            } catch (e: CancellationException) {
-                jobCancellationExceptionFound = true
+            } catch (e: DisabledBluetoothAdapterException) {
+                disabledBluetoothAdapterException = true
             } catch (e: Exception) {
                 globalExceptionFound = true
             }
         }
+        mJob.join()
 
-        delay(200)
-        mJob.cancelAndJoin()
-
-        assert(jobCancellationExceptionFound)
+        assert(disabledBluetoothAdapterException)
         assert(globalExceptionFound.not())
         assert(discoveredList.size == 2)
         verify { mBluetoothLeScanner.startScan(capture(mScanCallback)) }

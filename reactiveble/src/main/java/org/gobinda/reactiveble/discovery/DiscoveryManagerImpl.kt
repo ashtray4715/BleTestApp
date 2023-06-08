@@ -1,10 +1,13 @@
 package org.gobinda.reactiveble.discovery
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -47,6 +50,29 @@ internal class DiscoveryManagerImpl(private val context: Context) : DiscoveryMan
             return@callbackFlow
         }
 
+        val bleStatusReceiver = object : BroadcastReceiver() {
+            override fun onReceive(p0: Context?, intent: Intent?) {
+                if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                        BluetoothAdapter.STATE_OFF -> {
+                            Timber.e("$TAG onReceive: Bluetooth status changed [OFF]")
+                            close(DisabledBluetoothAdapterException())
+                        }
+                        BluetoothAdapter.STATE_ON -> {
+                            Timber.e("$TAG onReceive: Bluetooth status changed [ON]")
+                        }
+                    }
+                }
+            }
+        }
+
+        val intentFilter = intentFilterFactory.getNewIntentFilter(
+            action = BluetoothAdapter.ACTION_STATE_CHANGED
+        )
+
+        Timber.i("$TAG registerReceiver: invoking")
+        context.registerReceiver(bleStatusReceiver, intentFilter)
+
         val scanCallBack = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 Timber.i("$TAG onScanResult: address ? ${result.device.address}")
@@ -70,6 +96,8 @@ internal class DiscoveryManagerImpl(private val context: Context) : DiscoveryMan
         awaitClose {
             Timber.i("$TAG stopScan: invoked successfully")
             bleAdapter.bluetoothLeScanner.stopScan(scanCallBack)
+            Timber.i("$TAG unregisterReceiver: invoked successfully")
+            context.unregisterReceiver(bleStatusReceiver)
         }
     }
 
