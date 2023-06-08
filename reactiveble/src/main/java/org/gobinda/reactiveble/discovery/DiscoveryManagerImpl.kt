@@ -2,15 +2,15 @@ package org.gobinda.reactiveble.discovery
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
 import android.content.Context
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import org.gobinda.reactiveble.common.IntentFilterFactory
 import org.gobinda.reactiveble.common.PermissionManager
-import org.gobinda.reactiveble.errors.DisabledBluetoothAdapterException
-import org.gobinda.reactiveble.errors.MissingPermissionsException
-import org.gobinda.reactiveble.errors.ModuleNotInitializedException
-import org.gobinda.reactiveble.errors.NullBluetoothAdapterException
+import org.gobinda.reactiveble.errors.*
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 
@@ -47,7 +47,30 @@ internal class DiscoveryManagerImpl(private val context: Context) : DiscoveryMan
             return@callbackFlow
         }
 
-        throw ModuleNotInitializedException()
+        val scanCallBack = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                Timber.i("$TAG onScanResult: address ? ${result.device.address}")
+                try {
+                    trySend(DiscoveredDeviceImpl(result.device))
+                } catch (e: Exception) {
+                    Timber.e("$TAG onScanResult: trySend failed with exception ${e.message}")
+                    e.printStackTrace()
+                }
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                Timber.i("$TAG onScanFailed: errorCode ? $errorCode")
+                close(ScanFailedException(errorCode = errorCode))
+            }
+        }
+
+        Timber.i("$TAG startScan: invoked successfully")
+        bleAdapter.bluetoothLeScanner.startScan(scanCallBack)
+
+        awaitClose {
+            Timber.i("$TAG stopScan: invoked successfully")
+            bleAdapter.bluetoothLeScanner.stopScan(scanCallBack)
+        }
     }
 
     companion object {
